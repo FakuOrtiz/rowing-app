@@ -1,4 +1,4 @@
-# Palada — remo en casa
+# Rowing App — remo en casa
 
 App web para entrenar en máquina de remo. Armás rutinas, seguís el ritmo con un remero animado y, si querés, navegás por un río 3D que se genera solo mientras remás.
 
@@ -34,7 +34,7 @@ Dependencias externas, cargadas desde CDN: [three.js r128](https://cdnjs.com/lib
 Tiene que servirse por HTTP (abrir el archivo directo con doble clic funciona, pero sin modo offline ni instalación):
 
 ```bash
-cd palada
+cd rowing-app
 python3 -m http.server 8000
 # abrí http://localhost:8000
 ```
@@ -45,18 +45,18 @@ python3 -m http.server 8000
    ```bash
    git init
    git add .
-   git commit -m "Palada: primera versión"
+   git commit -m "Rowing App: primera versión"
    git branch -M main
-   git remote add origin https://github.com/TU_USUARIO/palada.git
+   git remote add origin https://github.com/TU_USUARIO/rowing-app.git
    git push -u origin main
    ```
 2. En el repositorio: **Settings → Pages → Build and deployment**, elegí **Deploy from a branch**, rama `main` y carpeta `/ (root)`. Guardá.
-3. En uno o dos minutos queda en `https://TU_USUARIO.github.io/palada/`.
+3. En uno o dos minutos queda en `https://TU_USUARIO.github.io/rowing-app/`.
 4. En el celular, abrí esa dirección y usá **Agregar a pantalla de inicio**. Se abre en pantalla completa como una app.
 
 ## Notas
 
 - **Metros por palada**: la distancia es una estimación. En *Ajustes → Medirlo con tu máquina* podés calibrarla con lo que marca tu monitor.
 - **Datos**: rutinas, historial y ajustes se guardan en el `localStorage` del navegador. Si borrás los datos del sitio, se pierden.
-- **Actualizaciones**: si cambiás archivos, subí el número en `CACHE` dentro de `sw.js` (por ejemplo `palada-v2`) para que los celulares tomen la versión nueva.
+- **Actualizaciones**: si cambiás archivos, subí el número en `CACHE` dentro de `sw.js` (por ejemplo `rowing-v6`) para que los celulares tomen la versión nueva.
 - **Mapas**: si agregás paisajes o elementos nuevos al generador, los números de mapa viejos pueden armar mundos algo distintos.

@@ -222,7 +222,7 @@ function homeHTML(){
       (reps > 1 ? '<p class="note">Se repite ' + reps + " veces" + (r.repRest > 0 ? ", con " + fmt(r.repRest) + " de descanso entre cada vuelta." : ", sin descanso.") + "</p>" : "") + "</details></div>" +
       '<div class="acts"><button class="btn small" data-act="edit" data-id="' + r.id + '">Editar</button><button class="btn small primary" data-act="start" data-id="' + r.id + '">Empezar</button></div></li>';
   }).join("") : '<li class="empty">Todavía no tenés rutinas. Armá la primera.</li>';
-  return '<h1>Palada</h1><p class="lede">Elegí el ritmo, seguí al remero y dejá que la app cuente.</p>' +
+  return '<h1>Rowing App</h1><p class="lede">Elegí el ritmo, seguí al remero y dejá que la app cuente.</p>' +
     '<section class="panel"><h2>Empezar ahora</h2>' +
     '<div class="segctl">' +
       ["time","Por tiempo","dist","Por distancia","free","Libre"].reduce((a,v,i,arr) => i % 2 ? a : a + '<button data-qmode="' + v + '" aria-pressed="' + (q.mode === v) + '">' + arr[i+1] + "</button>", "") +
@@ -521,11 +521,41 @@ function quickStart(){
 }
 
 /* ---------- audio / wake ---------- */
-let AC = null, IN = null;
+let AC = null, IN = null, unlocked = false, silentEl = null;
 const VOL = [0, 0.7, 1.2, 1.9];
+/* tiny silent WAV: playing it from a tap moves iOS into the "playback" audio
+   category, so Web Audio is heard even with the ring/silent switch off */
+function silentWav(){
+  const n = 800, b = new ArrayBuffer(44 + n * 2), d = new DataView(b), w = (o, s) => { for (let i = 0; i < s.length; i++) d.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, "RIFF"); d.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
+  d.setUint32(16, 16, true); d.setUint16(20, 1, true); d.setUint16(22, 1, true); d.setUint32(24, 8000, true);
+  d.setUint32(28, 16000, true); d.setUint16(32, 2, true); d.setUint16(34, 16, true); w(36, "data"); d.setUint32(40, n * 2, true);
+  return URL.createObjectURL(new Blob([b], {type:"audio/wav"}));
+}
+/* must run inside a user gesture (iOS Safari only unlocks audio there) */
+function unlockAudio(){
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch(e){}
+  try {
+    if (!silentEl){ silentEl = new Audio(silentWav()); silentEl.setAttribute("playsinline", ""); }
+    const p = silentEl.play(); if (p && p.catch) p.catch(() => {});
+  } catch(e){}
+  if (AC){
+    try {
+      // play a one-sample buffer synchronously in the gesture
+      const src = AC.createBufferSource(); src.buffer = AC.createBuffer(1, 1, 22050);
+      src.connect(AC.destination); src.start(0);
+    } catch(e){}
+  }
+  try {
+    // speechSynthesis on iOS needs its first utterance started from a tap
+    if (!unlocked && "speechSynthesis" in window){ const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); }
+  } catch(e){}
+  unlocked = true;
+}
 function ensureAudio(){
   try {
     if (!AC){
+      try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch(e){}
       AC = new (window.AudioContext || window.webkitAudioContext)();
       // clean chain: sources -> IN (volume) -> gentle compressor -> speakers (no distortion)
       IN = AC.createGain();
@@ -535,9 +565,18 @@ function ensureAudio(){
       IN.connect(comp); comp.connect(make); make.connect(AC.destination);
     }
     IN.gain.value = VOL[S.settings.vol] != null ? VOL[S.settings.vol] : 1.2;
-    if (AC.state === "suspended") AC.resume();
+    // iOS can also leave it "interrupted" (lock screen, call, other app)
+    if (AC.state !== "running"){ const p = AC.resume(); if (p && p.catch) p.catch(() => {}); }
+    if (!unlocked) unlockAudio();
   } catch(e){ AC = null; }
 }
+// any tap re-arms audio: covers the first touch and coming back from the lock screen
+["touchend", "pointerup", "click", "keydown"].forEach(ev => document.addEventListener(ev, () => {
+  if (!unlocked || (AC && AC.state !== "running")){ ensureAudio(); unlockAudio(); }
+}, {capture:true, passive:true}));
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && AC && AC.state !== "running"){ const p = AC.resume(); if (p && p.catch) p.catch(() => {}); }
+});
 /* one partial: sine with soft attack and natural decay */
 function partial(f, t, g, d, type){
   const o = AC.createOscillator(), v = AC.createGain();
