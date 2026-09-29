@@ -341,6 +341,7 @@ ul.list li.h{display:block;padding:14px 0}
 .h-dur{font-family:var(--display);font-weight:800;font-size:26px;line-height:1;white-space:nowrap;font-variant-numeric:tabular-nums}
 .h-when{color:var(--muted);font-size:14px;margin-top:2px}
 .hnote{margin:8px 0 0;font-style:italic;font-size:14px;color:var(--muted)}
+.h-src{margin:6px 0 0;font-size:12px;font-weight:600;color:var(--muted)}
 .h-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .h-acts .danger{margin-left:auto}
 .h-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 12px;margin-top:12px;padding:12px 14px;background:var(--bg);border-radius:12px}

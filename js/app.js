@@ -417,12 +417,19 @@ function streakHTML(){
     '<div style="height:16px"></div>' + calHTML() + "</section>";
 }
 /* ---------- notas de la sesión: esfuerzo y datos del reloj ---------- */
+// what the watch counted wins over what the app assumed; distance comes from the watch's strokes
+const rowMin = x => x.avgSpm > 0 && x.strokes > 0 ? x.strokes / x.avgSpm : x.sec / 60;
+const hasWatch = x => x.wStrokes > 0 || x.wSpm > 0;
+const sStrokes = x => x.wStrokes || (x.wSpm ? x.wSpm * rowMin(x) : x.strokes);
+const sSpm = x => x.wSpm || (x.wStrokes ? x.wStrokes / rowMin(x) : x.avgSpm);
+const sMeters = x => x.realM || (hasWatch(x) ? sStrokes(x) * S.settings.mps : x.meters);
 function logHTML(x){
   const r = x.rpe || 0;
   return '<div class="log" data-hid="' + x.id + '"><span class="log-q">¿Qué tan duro fue?</span><div class="rpe">' +
     [1,2,3,4,5,6,7,8,9,10].map(i => '<button data-log="rpe" data-v="' + i + '" aria-pressed="' + (r === i) + '">' + i + "</button>").join("") +
     '</div><div class="rpe-lbl"><span>Suave</span><span>A fondo</span></div>' +
-    '<div class="fields"><label class="f">Distancia del reloj (km)<input type="text" inputmode="decimal" data-log="km" value="' + (x.realM ? String(x.realM / 1000).replace(".", ",") : "") + '"></label>' +
+    '<div class="fields"><label class="f">Paladas del reloj<input type="number" inputmode="numeric" data-log="wStrokes" value="' + (x.wStrokes || "") + '"></label>' +
+    '<label class="f">Paladas por minuto<input type="number" inputmode="numeric" data-log="wSpm" value="' + (x.wSpm || "") + '"></label>' +
     '<label class="f">Calorías<input type="number" inputmode="numeric" data-log="kcal" value="' + (x.kcal || "") + '"></label>' +
     '<label class="f">Pulso medio<input type="number" inputmode="numeric" data-log="hr" value="' + (x.hr || "") + '"></label></div>' +
     '<label class="f">Nota<input type="text" data-log="note" maxlength="200" value="' + esc(x.note || "") + '" placeholder="Cómo te sentiste, qué cambiarías…"></label></div>';
@@ -438,9 +445,11 @@ function onLog(e){
     box.querySelectorAll("[data-log=rpe]").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.v === x.rpe)));
   } else {
     if (e.type !== "input") return true;
-    const key = {km:"realM", kcal:"kcal", hr:"hr", note:"note"}[k];
-    const v = k === "note" ? t.value.trim() : k === "km" ? Math.round(num(t.value) * 1000) : Math.round(num(t.value));
+    const key = {wStrokes:"wStrokes", wSpm:"wSpm", kcal:"kcal", hr:"hr", note:"note"}[k];
+    const v = k === "note" ? t.value.trim() : Math.round(num(t.value));
     if (k === "note" ? v : v > 0) x[key] = v; else delete x[key];
+    // the summary screen follows the watch numbers as they are typed
+    if (box.closest("#p-log")) $("#p-sumgrid").innerHTML = sumGrid(x);
   }
   save(); return true;
 }
@@ -448,10 +457,10 @@ function onLog(e){
 function histStats(x){
   const c = (k, v) => "<div><span>" + k + "</span><b>" + v + "</b></div>";
   return '<div class="h-stats">' +
-    (x.realM ? c("Dist. app", fmtDist(x.meters)) + c("Dist. reloj", fmtDist(x.realM)) : c("Distancia", fmtDist(x.meters))) +
-    c("Paladas", nf(x.strokes)) +
+    c(x.realM ? "Dist. reloj" : "Distancia", fmtDist(sMeters(x))) + c("Paladas", nf(sStrokes(x))) + c("Paladas/min", nf(sSpm(x))) +
     (x.rpe ? c("Esfuerzo", x.rpe + "/10") : "") + (x.kcal ? c("Calorías", nf(x.kcal)) : "") + (x.hr ? c("Pulso medio", nf(x.hr)) : "") +
-    "</div>" + (x.note ? '<p class="hnote">' + esc(x.note) + "</p>" : "");
+    "</div>" + (hasWatch(x) ? '<p class="h-src">Paladas del reloj' + (x.realM ? "" : ", distancia calculada") + "</p>" : "") +
+    (x.note ? '<p class="hnote">' + esc(x.note) + "</p>" : "");
 }
 function histHTML(){
   const h = S.history.slice().sort((x, y) => y.date.localeCompare(x.date));
@@ -459,17 +468,18 @@ function histHTML(){
   const days = S.settings.histRange, t0 = new Date(), from = days ? new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() - days + 1).getTime() : 0;
   const wk = h.filter(x => startOf(x).getTime() >= from);
   const sum = (arr, f) => arr.reduce((a, x) => a + (f(x) || 0), 0);
-  const withWatch = wk.filter(x => x.realM), kcal = sum(wk, x => x.kcal);
+  const withWatch = wk.filter(hasWatch), kcal = sum(wk, x => x.kcal);
   // always the same six tiles, so the grid never ends with a gap
   const cell = (k, v, sub) => "<div><span>" + k + "</span><b>" + v + "</b>" + (sub ? "<small>" + sub + "</small>" : "") + "</div>";
-  const withSpm = wk.filter(x => x.avgSpm > 0 && x.sec > 0), spmSec = sum(withSpm, x => x.sec);
-  const avgSpm = spmSec ? sum(withSpm, x => x.avgSpm * x.sec) / spmSec : 0;
+  // weighted by minutes actually rowing, so rests don't drag the rate down
+  const withSpm = wk.filter(x => sSpm(x) > 0), spmMin = sum(withSpm, rowMin);
+  const avgSpm = spmMin ? sum(withSpm, x => sSpm(x) * rowMin(x)) / spmMin : 0;
   const stats = cell("Sesiones", wk.length) + cell("Tiempo", fmt(sum(wk, x => x.sec))) +
-    cell("Distancia", fmtDist(sum(wk, x => x.meters)), withWatch.length ? "Reloj: " + fmtDist(sum(withWatch, x => x.realM)) : "") +
-    cell("Paladas", nf(sum(wk, x => x.strokes))) + cell("Ritmo medio", avgSpm ? nf(Math.round(avgSpm)) : "–") +
+    cell("Distancia", fmtDist(sum(wk, sMeters))) +
+    cell("Paladas", nf(sum(wk, sStrokes))) + cell("Ritmo medio", avgSpm ? nf(Math.round(avgSpm)) : "–") +
     cell("Calorías", kcal ? nf(kcal) : "–");
   const partial = withWatch.length && withWatch.length < wk.length ?
-    '<p class="note">La distancia del reloj es de ' + withWatch.length + " de las " + wk.length + " sesiones: las que tienen el dato anotado.</p>" : "";
+    '<p class="note">' + withWatch.length + " de las " + wk.length + " sesiones usan las paladas del reloj; el resto, lo que contó la app.</p>" : "";
   const ranges = [[7, "7 días"], [30, "30 días"], [90, "90 días"], [0, "Todo"]];
   let lastMonth = "";
   const list = h.length ? h.map(x => {
@@ -478,7 +488,7 @@ function histHTML(){
     const mo = st.toLocaleDateString("es-AR", {month:"long", year:"numeric"}), moHead = mo !== lastMonth ? '<li class="h-month">' + mo.charAt(0).toUpperCase() + mo.slice(1) + "</li>" : "";
     lastMonth = mo;
     const canRep = x.seed && !(x.rid && !S.routines.some(r => r.id === x.rid));
-    const hasLog = x.rpe || x.note || x.kcal || x.realM || x.hr;
+    const hasLog = x.rpe || x.note || x.kcal || hasWatch(x) || x.hr;
     return moHead + '<li class="h' + (open ? " open" : "") + '" data-day="' + dayKey(st) + '">' +
       '<div class="h-top"><b class="h-name">' + esc(x.name) + '</b><b class="h-dur">' + fmt(x.sec) + "</b></div>" +
       '<div class="h-when">' + st.toLocaleDateString("es-AR", {weekday:"short", day:"numeric", month:"short"}) + ", " + hhmm(st) + " – " + hhmm(dt) +
@@ -1114,12 +1124,16 @@ function finish(){
     if (S.history.length > 300) S.history = S.history.slice(-300);
     save();
   }
-  $("#p-sumgrid").innerHTML = '<div><span>Tiempo</span><b>' + fmt(P.totalT) + '</b></div><div><span>Paladas</span><b>' + nf(P.strokes) +
-    '</b></div><div><span>Distancia est.</span><b>' + fmtDist(P.meters) + '</b></div><div><span>Ritmo medio</span><b>' + nf(avg) + '</b></div>';
+  $("#p-sumgrid").innerHTML = sumGrid(hEntry || {sec:P.totalT, strokes:P.strokes, meters:P.meters, avgSpm:avg});
   $("#p-sumnote").textContent = P.totalT >= 20 ? "Quedó guardado en el historial. Si querés, anotá cómo te fue:" : "Fue muy corta para guardarla en el historial.";
   $("#p-log").innerHTML = hEntry ? logHTML(hEntry) : "";
   $("#p-summary").hidden = false;
   unwake();
+}
+function sumGrid(x){
+  const w = hasWatch(x) ? " (reloj)" : "";
+  return '<div><span>Tiempo</span><b>' + fmt(x.sec) + '</b></div><div><span>Paladas' + w + '</span><b>' + nf(sStrokes(x)) +
+    '</b></div><div><span>Distancia ' + (w ? "calc." : "est.") + '</span><b>' + fmtDist(sMeters(x)) + '</b></div><div><span>Ritmo medio' + w + '</span><b>' + nf(sSpm(x)) + '</b></div>';
 }
 function rowTime(){
   // time spent on row segments (approx: total minus completed rest segments)
