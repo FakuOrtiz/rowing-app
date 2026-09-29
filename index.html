@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Palada — remo en casa</title>
+<meta name="description" content="Rutinas para máquina de remo: ritmo guiado, remero animado y un río 3D procedural para navegar mientras entrenás.">
+<meta name="theme-color" content="#0f2a33">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Palada">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Big+Shoulders+Display:wght@700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="app">
+  <main id="main"><div class="wrap" id="view"></div></main>
+  <nav class="tabs" aria-label="Secciones">
+    <button data-tab="home">Entrenar</button>
+    <button data-tab="calc">Calcular</button>
+    <button data-tab="hist">Historial</button>
+    <button data-tab="set">Ajustes</button>
+  </nav>
+</div>
+
+<div id="player" hidden>
+  <div class="p-top">
+    <div class="t"><b id="p-name">Sesión</b><span id="p-seg"></span><div class="p-bar"><div id="p-barfill"></div></div></div>
+    <button class="btn small" id="p-view">Ver río</button>
+  </div>
+
+  <div class="p-timer"><div class="tcell"><div id="p-time">0:00</div><div id="p-timelbl">restante del tramo</div></div><div class="tcell dcell"><div id="p-dist2">0 m</div><div class="dlbl">distancia est.</div></div></div>
+  <div class="p-fig">
+    <div id="p-toast" role="status" aria-live="polite"></div>
+    <div class="hint" id="p-hint"></div>
+    <svg id="rower" viewBox="55 48 325 115" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <line x1="70" y1="147" x2="322" y2="147" stroke="var(--line)" stroke-width="5" stroke-linecap="round"/>
+      <line x1="80" y1="147" x2="80" y2="160" stroke="var(--line)" stroke-width="5" stroke-linecap="round"/>
+      <line x1="330" y1="136" x2="340" y2="160" stroke="var(--line)" stroke-width="5" stroke-linecap="round"/>
+      <line x1="281" y1="152" x2="297" y2="120" stroke="var(--muted)" stroke-width="5" stroke-linecap="round"/>
+      <g id="wheel" transform="translate(352 118)">
+        <circle r="24" fill="none" stroke="var(--muted)" stroke-width="4"/>
+        <line x1="-20" y1="0" x2="20" y2="0" stroke="var(--muted)" stroke-width="3"/>
+        <line x1="0" y1="-20" x2="0" y2="20" stroke="var(--muted)" stroke-width="3"/>
+      </g>
+      <line id="chain" stroke="var(--muted)" stroke-width="2.5"/>
+      <rect id="seat" width="28" height="6" rx="3" fill="var(--muted)"/>
+      <g stroke="var(--ink)" stroke-linecap="round" fill="none">
+        <line id="shin" stroke-width="9"/>
+        <line id="thigh" stroke-width="10"/>
+        <line id="torso" stroke-width="12"/>
+        <line id="upper" stroke-width="7"/>
+        <line id="fore" stroke-width="7"/>
+      </g>
+      <circle id="head" r="11" fill="var(--ink)"/>
+      <rect id="handle" width="5" height="14" rx="2" fill="var(--ink)"/>
+    </svg>
+    <div class="cue-wrap">
+      <div class="cue"><span id="p-cue">Listo</span>
+        <div class="track"><div id="p-dot"></div><span class="lbl l">atrás</span><span class="lbl r">adelante</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="p-stats">
+    <div class="stat spm"><button id="p-minus" aria-label="Bajar ritmo">−</button><div><b id="p-spm">0</b><span class="lg">paladas por minuto</span><span class="sh">por minuto</span></div><button id="p-plus" aria-label="Subir ritmo">+</button></div>
+    <div class="stat"><b id="p-strokes">0</b><span>paladas</span></div>
+    <div class="stat dstat"><b id="p-dist">0 m</b><span class="lg">distancia est.</span><span class="sh">distancia</span></div>
+    <div class="stat"><b id="p-total">0:00</b><span class="lg">tiempo total</span><span class="sh">total</span></div>
+  </div>
+  <div class="p-next" id="p-next"></div>
+  <div class="p-ctrl">
+    <button class="btn primary" id="p-pause">Pausa</button>
+    <button class="btn" id="p-skip">Saltar</button>
+    <button class="btn stop" id="p-stop">Terminar</button>
+  </div>
+  <div id="p-flash"></div>
+  <div id="p-setup" hidden>
+    <div class="setup-card">
+      <div class="su-scroll">
+      <div class="su-head"><b id="su-name"></b><span id="su-sum"></span></div>
+      <div class="segctl" id="su-view"><button data-v="river">Navegar por el río</button><button data-v="figure">Solo el remero</button></div>
+      <div id="su-map">
+        <div class="map-row"><div class="t"><b id="su-mapn"></b></div><button class="btn small" id="su-new">Otro mapa</button></div>
+        <details style="margin-top:8px"><summary>Usar un número de mapa</summary><div class="map-row" style="margin-top:8px"><input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="su-seed" placeholder="Del 1 al 999.999" autocomplete="off"><button class="btn small" id="su-use">Usar</button></div><p class="note" id="su-seed-msg" style="margin-top:6px">Son 999.999 mapas: cada número es un mundo distinto.</p></details>
+      </div>
+      </div>
+      <div class="su-actions"><button class="btn" id="su-back">Volver</button><button class="btn primary" id="su-go">Arrancar</button></div>
+    </div>
+  </div>
+  <div id="p-summary" hidden>
+    <div class="panel">
+      <h1>Bien remado</h1>
+      <div class="grid-out" id="p-sumgrid"></div>
+      <p class="note" id="p-sumnote"></p>
+      <button class="btn primary big" id="p-done" style="margin-top:16px">Listo</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
