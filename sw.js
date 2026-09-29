@@ -1,7 +1,7 @@
 /* Rowing App service worker: works offline after the first visit.
    Own files: network first (so updates show up), cache as fallback.
    CDN files (three.js, fonts): cache first. */
-const CACHE = "rowing-v14";
+const CACHE = "rowing-v15";
 const SHELL = ["./", "index.html", "css/styles.css", "js/app.js", "manifest.webmanifest",
   "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 

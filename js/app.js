@@ -80,7 +80,7 @@ function loadLocal(){
 function merge(o){
   const d = DEFAULT();
   return {v:1, updatedAt:o.updatedAt||0,
-    settings:(x => { if (!['bell','marimba','drop','voice'].includes(x.sound)) x.sound = 'bell'; return x; })(Object.assign(d.settings, o.settings||{})),
+    settings:(x => { if (!['bell','marimba','drop'].includes(x.sound)) x.sound = 'bell'; return x; })(Object.assign(d.settings, o.settings||{})),
     quick:Object.assign(d.quick, o.quick||{}),
     routines:(() => { const r = Array.isArray(o.routines) ? o.routines : d.routines;
       if ((o.presetsV || 1) < 2) EXTRA_PRESETS().forEach(x => { if (!r.some(y => y.preset === x.preset)) r.push(x); });
@@ -364,8 +364,8 @@ function setHTML(){
     '<select data-s="ratio"><option value="1.5"' + (s.ratio == 1.5 ? " selected" : "") + '>1 a 1,5 (ritmos altos)</option><option value="2"' + (s.ratio == 2 ? " selected" : "") + '>1 a 2 (recomendado)</option><option value="3"' + (s.ratio == 3 ? " selected" : "") + ">1 a 3 (técnica, ritmo bajo)</option></select></section>" +
     '<section class="panel"><h2>Sonido y vibración</h2>' +
       '<div class="fields"><label class="f">Volumen<select data-s="vol"><option value="1"' + (s.vol == 1 ? " selected" : "") + '>Normal</option><option value="2"' + (s.vol == 2 ? " selected" : "") + '>Fuerte</option><option value="3"' + (s.vol == 3 ? " selected" : "") + '>Máximo</option></select></label>' +
-      '<label class="f">Tipo de sonido<select data-s="sound">' + [["bell","Campanita"],["marimba","Marimba"],["drop","Gota de agua"],["voice","Voz: tira y vuelve"]].map(o => '<option value="' + o[0] + '"' + (s.sound === o[0] ? " selected" : "") + ">" + o[1] + "</option>").join("") + '</select></label></div>' +
-      '<p class="note" style="margin:0 0 6px">Al tirar suena una nota aguda y al volver una más grave, así las distinguís sin mirar. Son notas claras que se escuchan por encima del agua sin ser molestas. La voz puede llegar un poquito tarde según el celular.</p>' +
+      '<label class="f">Tipo de sonido<select data-s="sound">' + [["bell","Campanita"],["marimba","Marimba"],["drop","Gota de agua"]].map(o => '<option value="' + o[0] + '"' + (s.sound === o[0] ? " selected" : "") + ">" + o[1] + "</option>").join("") + '</select></label></div>' +
+      '<p class="note" style="margin:0 0 6px">Al tirar suena una nota aguda y al volver una más grave, así las distinguís sin mirar. Son notas claras que se escuchan por encima del agua sin ser molestas.</p>' +
       '<label class="toggle"><span>Pitido al tirar (agudo)</span><input type="checkbox" data-s="tick"' + (s.tick ? " checked" : "") + "></label>" +
       '<label class="toggle"><span>Sonido al volver (grave, doble)</span><input type="checkbox" data-s="tickBack"' + (s.tickBack ? " checked" : "") + "></label>" +
       '<label class="toggle"><span>Avisos de cambio de tramo</span><input type="checkbox" data-s="alerts"' + (s.alerts ? " checked" : "") + "></label>" +
@@ -526,7 +526,7 @@ function quickStart(){
 }
 
 /* ---------- audio / wake ---------- */
-let AC = null, IN = null, unlocked = false, silentEl = null;
+let AC = null, IN = null, unlocked = false, silentEl = null, stale = false, lastCT = -1, lastCTAt = 0;
 const VOL = [0, 0.7, 1.2, 1.9];
 /* tiny silent WAV: playing it from a tap moves iOS into the "playback" audio
    category, so Web Audio is heard even with the ring/silent switch off */
@@ -542,7 +542,9 @@ function unlockAudio(){
   try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch(e){}
   try {
     if (!silentEl){ silentEl = new Audio(silentWav()); silentEl.setAttribute("playsinline", ""); }
-    const p = silentEl.play(); if (p && p.catch) p.catch(() => {});
+    // while rowing it loops: if it stops, iOS can fall back to the ambient session and the silent switch mutes us
+    silentEl.loop = !!P.active;
+    if (silentEl.paused){ const p = silentEl.play(); if (p && p.catch) p.catch(() => {}); }
   } catch(e){}
   if (AC){
     try {
@@ -551,10 +553,6 @@ function unlockAudio(){
       src.connect(AC.destination); src.start(0);
     } catch(e){}
   }
-  try {
-    // speechSynthesis on iOS needs its first utterance started from a tap
-    if (!unlocked && "speechSynthesis" in window){ const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); }
-  } catch(e){}
   unlocked = true;
 }
 function ensureAudio(){
@@ -562,6 +560,9 @@ function ensureAudio(){
     if (!AC){
       try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch(e){}
       AC = new (window.AudioContext || window.webkitAudioContext)();
+      stale = false; lastCT = -1;
+      // iOS drops to "interrupted"/"suspended" on notifications, Siri, other apps: try to come back on our own
+      AC.onstatechange = () => { if (AC && AC.state !== "running" && AC.state !== "closed") resumeAC(); };
       // clean chain: sources -> IN (volume) -> gentle compressor -> speakers (no distortion)
       IN = AC.createGain();
       const comp = AC.createDynamicsCompressor();
@@ -571,16 +572,34 @@ function ensureAudio(){
     }
     IN.gain.value = VOL[S.settings.vol] != null ? VOL[S.settings.vol] : 1.2;
     // iOS can also leave it "interrupted" (lock screen, call, other app)
-    if (AC.state !== "running"){ const p = AC.resume(); if (p && p.catch) p.catch(() => {}); }
+    if (AC.state !== "running") resumeAC();
     if (!unlocked) unlockAudio();
   } catch(e){ AC = null; }
 }
+function resumeAC(){ try { const p = AC && AC.resume(); if (p && p.catch) p.catch(() => {}); } catch(e){} }
+/* iOS sometimes leaves a context that says "running" but whose clock is frozen and plays nothing
+   (after an interruption or an audio route change). Only a new context fixes it, and iOS
+   only lets us build one inside a tap, so we flag it and rebuild on the next touch. */
+function rebuildAudio(){
+  try { if (AC && AC.close) AC.close(); } catch(e){}
+  AC = null; IN = null; unlocked = false; stale = false;
+  ensureAudio(); unlockAudio();
+}
+function audioHealth(){
+  if (!AC) return;
+  if (AC.state !== "running"){ resumeAC(); return; }
+  const now = performance.now();
+  if (lastCT >= 0 && AC.currentTime === lastCT && now - lastCTAt > 1500) stale = true;
+  if (AC.currentTime !== lastCT){ lastCT = AC.currentTime; lastCTAt = now; }
+}
 // any tap re-arms audio: covers the first touch and coming back from the lock screen
 ["touchend", "pointerup", "click", "keydown"].forEach(ev => document.addEventListener(ev, () => {
-  if (!unlocked || (AC && AC.state !== "running")){ ensureAudio(); unlockAudio(); }
+  if (stale || (AC && AC.state === "closed")) rebuildAudio();
+  else if (!unlocked || (AC && AC.state !== "running")){ ensureAudio(); unlockAudio(); }
+  else if (P.active) unlockAudio(); // keeps the silent loop and the "playback" session alive
 }, {capture:true, passive:true}));
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && AC && AC.state !== "running"){ const p = AC.resume(); if (p && p.catch) p.catch(() => {}); }
+  if (document.visibilityState === "visible" && AC){ lastCT = -1; if (AC.state !== "running") resumeAC(); }
 });
 /* one partial: sine with soft attack and natural decay */
 function partial(f, t, g, d, type){
@@ -623,27 +642,17 @@ function drop(f1, f2, g, d, delay){
 }
 /* generic alert tone used for countdowns: always a soft chime */
 function beep(f, d, g, _type, delay){ chime(Array.isArray(f) ? f[0] : f, Math.min(g || 0.4, 0.5), Math.max(d, 0.35), delay); }
-function say(txt){
-  try {
-    if (!("speechSynthesis" in window)) return false;
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(txt); u.lang = "es-AR"; u.rate = 1.5; u.volume = 1;
-    speechSynthesis.speak(u); return true;
-  } catch(e){ return false; }
-}
 // notes: C6 1047, E6 1319, G5 784, E5 659
 function tirarSound(){
   const st = S.settings.sound;
   if (st === "marimba") mallet(1047, 0.55, 0.35);
   else if (st === "drop") drop(700, 1500, 0.5, 0.22);
-  else if (st === "voice"){ if (!say("tira")) chime(1319, 0.45, 0.5); }
   else chime(1319, 0.45, 0.6);
 }
 function volverSound(){
   const st = S.settings.sound;
   if (st === "marimba") mallet(784, 0.4, 0.3);
   else if (st === "drop") drop(500, 900, 0.35, 0.2);
-  else if (st === "voice"){ if (!say("vuelve")) chime(784, 0.35, 0.5); }
   else chime(784, 0.32, 0.5);
 }
 function flash(kind){
@@ -677,6 +686,7 @@ async function wake(){
 }
 function unwake(){
   try { if (lock) lock.release(); } catch(e){} lock = null;
+  try { if (silentEl){ silentEl.loop = false; silentEl.pause(); } } catch(e){}
   try { if (keepVid) keepVid.pause(); } catch(e){}
 }
 document.addEventListener("visibilitychange", () => { if (P.active && document.visibilityState === "visible") wake(); });
@@ -729,7 +739,7 @@ function newMap(sd){
 }
 function beginWorkout(){
   if (!P.setup) return;
-  ensureAudio();
+  ensureAudio(); unlockAudio();
   P.setup = false; pl.classList.remove("setup"); el("p-setup").hidden = true;
   P.running = true; P.last = performance.now(); P.startedAt = Date.now();
   wake();
@@ -825,6 +835,7 @@ function advance(dt){
 }
 function tick(now){
   if (!P.active) return;
+  if (P.running) audioHealth();
   let dt = (now - P.last) / 1000; P.last = now;
   if (!(dt >= 0) || dt > 3600) dt = 0;
   if (P.running && !P.done){
@@ -957,7 +968,7 @@ function closePlayer(){
 }
 function togglePause(){
   if (P.done || P.setup) return;
-  ensureAudio();
+  ensureAudio(); unlockAudio();
   P.running = !P.running; P.last = performance.now();
   // coming back from a pause: count 3-2-1 before rowing again
   if (P.running){
