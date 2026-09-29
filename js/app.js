@@ -2573,18 +2573,6 @@ pose(0, 0, 0);
 initCloud();
 
 /* ---------- offline + install (only when served from a web server) ---------- */
-/* iOS home-screen apps get a layout viewport shorter than the screen: size the shell from the screen itself */
-if (navigator.standalone === true){
-  const fitScreen = () => {
-    const portrait = window.matchMedia("(orientation: portrait)").matches;
-    const h = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
-    document.documentElement.style.setProperty("--app-h", Math.max(h, window.innerHeight) + "px");
-  };
-  fitScreen();
-  window.addEventListener("resize", fitScreen);
-  window.addEventListener("orientationchange", () => setTimeout(fitScreen, 300));
-}
-
 if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
   window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
 }
