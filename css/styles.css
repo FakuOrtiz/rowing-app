@@ -25,8 +25,9 @@ button,input,select{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:3px solid var(--blade);outline-offset:2px}
 
-/* fixed to the full screen: on iOS standalone, height:100% stops short of the bottom edge */
-#app{position:fixed;top:0;right:0;bottom:0;left:0;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
+/* iOS standalone reports a viewport shorter than the screen, so bottom:0 stops short;
+   app.js sets --app-h to the real screen height there */
+#app{position:fixed;top:0;right:0;left:0;height:var(--app-h,100%);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
 main{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
   padding:16px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}
 .wrap{max-width:760px;margin:0 auto}
@@ -116,7 +117,7 @@ ol.segs{list-style:none;margin:0 0 12px;padding:0}
 details summary{cursor:pointer;font-weight:600;margin-top:10px}
 
 /* ===== player ===== */
-#player{position:fixed;top:0;right:0;bottom:0;left:0;z-index:20;background:var(--bg);display:grid;gap:10px;
+#player{position:fixed;top:0;right:0;left:0;height:var(--app-h,100%);z-index:20;background:var(--bg);display:grid;gap:10px;
   padding:calc(env(safe-area-inset-top,0px) + 10px) max(14px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 10px) max(14px,env(safe-area-inset-left,0px));
   grid-template-columns:minmax(0,1fr);
   grid-template-rows:auto auto minmax(0,1fr) auto auto;

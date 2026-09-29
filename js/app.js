@@ -20,6 +20,7 @@ function fmtPace(p){
   const m = Math.floor(p / 60), s = p - m * 60;
   return m + ":" + s.toFixed(1).padStart(4, "0").replace(".", ",");
 }
+function hhmm(d){ return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
 function fmtDist(m){ return m >= 1000 ? nf(m / 1000, 2) + " km" : nf(m) + " m"; }
 function parseTime(str){
   str = String(str == null ? "" : str).trim().replace(",", ".");
@@ -334,8 +335,10 @@ function histHTML(){
   const sum = (arr, k) => arr.reduce((a, x) => a + (x[k] || 0), 0);
   const list = h.length ? h.map(x => {
     const dt = new Date(x.date);
-    return '<li><div class="t"><b>' + esc(x.name) + "</b><span>" + dt.toLocaleDateString("es-AR", {weekday:"short", day:"numeric", month:"short"}) + ", " +
-      dt.toLocaleTimeString("es-AR", {hour:"2-digit", minute:"2-digit"}) + (x.seed ? '</span><span class="hmap">Mapa ' + nf(x.seed) + (x.rid && !S.routines.some(r => r.id === x.rid) ? "" : ' <button class="btn small" data-act="rep" data-id="' + x.id + '">Remarlo de nuevo</button>') + "</span>" : "</span>") +
+    // older entries only kept the end time: estimate the start from the rowed time
+    const st = x.start ? new Date(x.start) : new Date(dt.getTime() - (x.sec || 0) * 1000);
+    return '<li><div class="t"><b>' + esc(x.name) + "</b><span>" + st.toLocaleDateString("es-AR", {weekday:"short", day:"numeric", month:"short"}) + ", " +
+      hhmm(st) + " – " + hhmm(dt) + (x.seed ? '</span><span class="hmap">Mapa ' + nf(x.seed) + (x.rid && !S.routines.some(r => r.id === x.rid) ? "" : ' <button class="btn small" data-act="rep" data-id="' + x.id + '">Remarlo de nuevo</button>') + "</span>" : "</span>") +
       "</div><div class=\"t\" style=\"text-align:right\"><b>" + fmt(x.sec) + "</b><span>" + fmtDist(x.meters) + ", " + nf(x.strokes) + " paladas</span>" +
       '<button class="btn small danger hdel" data-act="del-hist" data-id="' + x.id + '">' + (confirmKey === "del-hist-" + x.id ? "¿Seguro?" : "Borrar") + "</button></div></li>";
   }).join("") : '<li class="empty">Cuando termines una sesión, queda anotada acá.</li>';
@@ -691,7 +694,7 @@ function startWorkout(name, segs, free, opts){
   ensureAudio();
   const list = segs.map(s => Object.assign({}, s));
   const planned = list.reduce((a, s) => a + (isFinite(s.sec) ? s.sec : 0), 0);
-  Object.assign(P, {active:true, name, segs:list, free, idx:0, segT:0, totalT:0, phase:0, cyc:0, strokes:0, meters:0,
+  Object.assign(P, {active:true, startedAt:0, name, segs:list, free, idx:0, segT:0, totalT:0, phase:0, cyc:0, strokes:0, meters:0,
     running:false, setup:true, preroll:3.999, done:false, adj:0, wheel:0, planned, last:performance.now(), stopArmed:false, phaseKey:"",
     seed:opts.seed || newSeed(), rid:opts.rid || null, usedRiver:false,
     src:opts.rid ? null : (segs.length <= 3 ? segs.map(x => Object.assign({}, x, {sec:isFinite(x.sec) ? x.sec : null})) : null)});
@@ -728,7 +731,7 @@ function beginWorkout(){
   if (!P.setup) return;
   ensureAudio();
   P.setup = false; pl.classList.remove("setup"); el("p-setup").hidden = true;
-  P.running = true; P.last = performance.now();
+  P.running = true; P.last = performance.now(); P.startedAt = Date.now();
   wake();
 }
 el("su-view").addEventListener("click", e => { const b = e.target.closest("[data-v]"); if (b) setupView(b.dataset.v); });
@@ -924,7 +927,7 @@ function finish(){
   vib(400);
   const avg = P.totalT > 0 ? P.strokes / (rowTime() / 60 || 1) : 0;
   if (P.totalT >= 20){
-    const hEntry = {id:uid(), date:new Date().toISOString(), name:P.name, sec:Math.round(P.totalT), strokes:P.strokes, meters:Math.round(P.meters), avgSpm:Math.round(avg)};
+    const hEntry = {id:uid(), date:new Date().toISOString(), start:new Date(P.startedAt || Date.now() - P.totalT * 1000).toISOString(), name:P.name, sec:Math.round(P.totalT), strokes:P.strokes, meters:Math.round(P.meters), avgSpm:Math.round(avg)};
     if (P.usedRiver) hEntry.seed = P.seed;
     if (P.rid) hEntry.rid = P.rid; else if (P.src){ hEntry.src = P.src; hEntry.free = !!P.free; }
     S.history.push(hEntry);
@@ -2570,6 +2573,18 @@ pose(0, 0, 0);
 initCloud();
 
 /* ---------- offline + install (only when served from a web server) ---------- */
+/* iOS home-screen apps get a layout viewport shorter than the screen: size the shell from the screen itself */
+if (navigator.standalone === true){
+  const fitScreen = () => {
+    const portrait = window.matchMedia("(orientation: portrait)").matches;
+    const h = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    document.documentElement.style.setProperty("--app-h", Math.max(h, window.innerHeight) + "px");
+  };
+  fitScreen();
+  window.addEventListener("resize", fitScreen);
+  window.addEventListener("orientationchange", () => setTimeout(fitScreen, 300));
+}
+
 if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
   window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
 }
