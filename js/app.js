@@ -66,7 +66,7 @@ function HORA_SEGS(){
 }
 const DEFAULT = () => ({
   v:1, updatedAt:0,
-  settings:{mps:9, ratio:2, tick:true, tickBack:true, alerts:true, vol:2, sound:"bell", flash:false, view:"river", vibe:false, theme:"auto"},
+  settings:{mps:9, ratio:2, tick:true, tickBack:true, alerts:true, vol:2, sound:"bell", flash:false, view:"river", vibe:false, theme:"auto", histRange:7, weekStart:0},
   quick:{mode:"time", min:"5", spm:28, dist:2000, tgt:"10:00", freeSpm:22},
   routines:PRESETS().concat(EXTRA_PRESETS()), presetsV:3, history:[]
 });
@@ -328,24 +328,143 @@ function calcOut(){
   return [a, b];
 }
 
+/* ---------- constancia: semanas seguidas cumpliendo la meta ---------- */
+const dayKey = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+// older entries only kept the end time: estimate the start from the rowed time
+const startOf = x => x.start ? new Date(x.start) : new Date(new Date(x.date).getTime() - (x.sec || 0) * 1000);
+// first day of the week from Ajustes: 0 domingo, 1 lunes, 6 sábado
+const wsDay = () => S.settings.weekStart || 0;
+function weekStart(d){ const w = new Date(d.getFullYear(), d.getMonth(), d.getDate()); w.setDate(w.getDate() - (w.getDay() - wsDay() + 7) % 7); return w; }
+// streak = weeks in a row (starting on the day set in Ajustes) with at least one session
+function streakInfo(){
+  const per = {};
+  let first = null;
+  S.history.forEach(x => { const w = weekStart(startOf(x)), k = dayKey(w); per[k] = (per[k] || 0) + 1; if (!first || w < first) first = w; });
+  const cur = weekStart(new Date()), thisWeek = per[dayKey(cur)] || 0;
+  // the current week adds once you row; until the week ends it doesn't break the streak
+  let streak = thisWeek ? 1 : 0;
+  const w = new Date(cur);
+  for (;;){ w.setDate(w.getDate() - 7); if (per[dayKey(w)]) streak++; else break; }
+  let best = 0, run = 0;
+  if (first) for (const d = new Date(first); d <= cur; d.setDate(d.getDate() + 7)){
+    if (per[dayKey(d)]){ run++; best = Math.max(best, run); } else if (dayKey(d) !== dayKey(cur)) run = 0;
+  }
+  return {thisWeek, streak, best:Math.max(best, streak)};
+}
+let calOff = 0, calOpen = false, histEdit = null;
+// collapsed: just the current week; expanded: the whole month with navigation
+function calHTML(){
+  const now = new Date(), today = dayKey(now), mins = {};
+  S.history.forEach(x => { const k = dayKey(startOf(x)); mins[k] = (mins[k] || 0) + (x.sec || 0) / 60; });
+  const cell = dt => {
+    const k = dayKey(dt), v = mins[k] || 0, d = dt.getDate();
+    const lvl = v >= 40 ? 3 : v >= 20 ? 2 : v > 0 ? 1 : 0, cls = "cal-d" + (lvl ? " l" + lvl : "") + (k === today ? " today" : "");
+    // days with sessions are buttons that jump to them in the list
+    return v ? '<button class="' + cls + '" data-act="cal-day" data-k="' + k + '" aria-label="Ver lo del ' + d + " (" + Math.round(v) + ' min)">' + d + "</button>"
+      : '<span class="' + cls + '">' + d + "</span>";
+  };
+  let cells = [0,1,2,3,4,5,6].map(i => '<span class="cal-h">' + "DLMMJVS"[(i + wsDay()) % 7] + "</span>").join(""), head = "";
+  if (calOpen){
+    const m = new Date(now.getFullYear(), now.getMonth() + calOff, 1);
+    const lead = (m.getDay() - wsDay() + 7) % 7, n = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
+    for (let i = 0; i < lead; i++) cells += "<span></span>";
+    for (let d = 1; d <= n; d++) cells += cell(new Date(m.getFullYear(), m.getMonth(), d));
+    const label = m.toLocaleDateString("es-AR", {month:"long", year:"numeric"});
+    head = '<div class="cal-nav"><button class="btn small" data-act="cal-prev" aria-label="Mes anterior">‹</button><b>' + label.charAt(0).toUpperCase() + label.slice(1) +
+      '</b><button class="btn small" data-act="cal-next" aria-label="Mes siguiente"' + (calOff >= 0 ? " disabled" : "") + ">›</button></div>";
+  } else {
+    const w = weekStart(now);
+    for (let i = 0; i < 7; i++) cells += cell(new Date(w.getFullYear(), w.getMonth(), w.getDate() + i));
+  }
+  return head + '<div class="cal">' + cells + '</div><div class="cal-key"><span class="cal-d l1"></span>menos de 20 min<span class="cal-d l2"></span>20 a 40<span class="cal-d l3"></span>más de 40</div>' +
+    '<div class="cal-more"><button class="btn small" data-act="cal-toggle">' + (calOpen ? "Ver solo esta semana" : "Ver el mes completo") + "</button></div>";
+}
+function streakHTML(){
+  const s = streakInfo(), days = new Set(S.history.map(x => dayKey(startOf(x)))).size;
+  return '<section class="panel"><h2>Constancia</h2>' +
+    '<div class="grid-out"><div><span>Racha</span><b>' + s.streak + " " + (s.streak === 1 ? "semana" : "semanas") + "</b></div><div><span>Esta semana</span><b>" +
+    s.thisWeek + " " + (s.thisWeek === 1 ? "sesión" : "sesiones") + "</b></div><div><span>Mejor racha</span><b>" + s.best + " " + (s.best === 1 ? "semana" : "semanas") + "</b></div>" +
+    "<div><span>Días remando</span><b>" + days + " " + (days === 1 ? "día" : "días") + "</b></div></div>" +
+    '<div style="height:16px"></div>' + calHTML() + "</section>";
+}
+/* ---------- notas de la sesión: esfuerzo y datos del reloj ---------- */
+function logHTML(x){
+  const r = x.rpe || 0;
+  return '<div class="log" data-hid="' + x.id + '"><span class="log-q">¿Qué tan duro fue?</span><div class="rpe">' +
+    [1,2,3,4,5,6,7,8,9,10].map(i => '<button data-log="rpe" data-v="' + i + '" aria-pressed="' + (r === i) + '">' + i + "</button>").join("") +
+    '</div><div class="rpe-lbl"><span>Suave</span><span>A fondo</span></div>' +
+    '<div class="fields"><label class="f">Distancia del reloj (km)<input type="text" inputmode="decimal" data-log="km" value="' + (x.realM ? String(x.realM / 1000).replace(".", ",") : "") + '"></label>' +
+    '<label class="f">Calorías<input type="number" inputmode="numeric" data-log="kcal" value="' + (x.kcal || "") + '"></label>' +
+    '<label class="f">Pulso medio<input type="number" inputmode="numeric" data-log="hr" value="' + (x.hr || "") + '"></label></div>' +
+    '<label class="f">Nota<input type="text" data-log="note" maxlength="200" value="' + esc(x.note || "") + '" placeholder="Cómo te sentiste, qué cambiarías…"></label></div>';
+}
+// shared by the summary screen and the history list; true when the event was one of ours
+function onLog(e){
+  const t = e.target.closest("[data-log]"); if (!t) return false;
+  const box = t.closest("[data-hid]"), x = box && S.history.find(h => h.id === box.dataset.hid); if (!x) return true;
+  const k = t.dataset.log;
+  if (k === "rpe"){
+    if (e.type !== "click") return true;
+    const v = +t.dataset.v; x.rpe = x.rpe === v ? 0 : v; if (!x.rpe) delete x.rpe;
+    box.querySelectorAll("[data-log=rpe]").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.v === x.rpe)));
+  } else {
+    if (e.type !== "input") return true;
+    const key = {km:"realM", kcal:"kcal", hr:"hr", note:"note"}[k];
+    const v = k === "note" ? t.value.trim() : k === "km" ? Math.round(num(t.value) * 1000) : Math.round(num(t.value));
+    if (k === "note" ? v : v > 0) x[key] = v; else delete x[key];
+  }
+  save(); return true;
+}
+// one history row's numbers as a label-over-value grid, so every figure lines up
+function histStats(x){
+  const c = (k, v) => "<div><span>" + k + "</span><b>" + v + "</b></div>";
+  return '<div class="h-stats">' +
+    (x.realM ? c("Dist. app", fmtDist(x.meters)) + c("Dist. reloj", fmtDist(x.realM)) : c("Distancia", fmtDist(x.meters))) +
+    c("Paladas", nf(x.strokes)) +
+    (x.rpe ? c("Esfuerzo", x.rpe + "/10") : "") + (x.kcal ? c("Calorías", nf(x.kcal)) : "") + (x.hr ? c("Pulso medio", nf(x.hr)) : "") +
+    "</div>" + (x.note ? '<p class="hnote">' + esc(x.note) + "</p>" : "");
+}
 function histHTML(){
   const h = S.history.slice().sort((x, y) => y.date.localeCompare(x.date));
-  const weekAgo = Date.now() - 7 * 864e5;
-  const wk = h.filter(x => new Date(x.date).getTime() >= weekAgo);
-  const sum = (arr, k) => arr.reduce((a, x) => a + (x[k] || 0), 0);
+  // "7 días" = today and the 6 before it, whole days, same as the chart's bars
+  const days = S.settings.histRange, t0 = new Date(), from = days ? new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() - days + 1).getTime() : 0;
+  const wk = h.filter(x => startOf(x).getTime() >= from);
+  const sum = (arr, f) => arr.reduce((a, x) => a + (f(x) || 0), 0);
+  const withWatch = wk.filter(x => x.realM), kcal = sum(wk, x => x.kcal);
+  // always the same six tiles, so the grid never ends with a gap
+  const cell = (k, v, sub) => "<div><span>" + k + "</span><b>" + v + "</b>" + (sub ? "<small>" + sub + "</small>" : "") + "</div>";
+  const withSpm = wk.filter(x => x.avgSpm > 0 && x.sec > 0), spmSec = sum(withSpm, x => x.sec);
+  const avgSpm = spmSec ? sum(withSpm, x => x.avgSpm * x.sec) / spmSec : 0;
+  const stats = cell("Sesiones", wk.length) + cell("Tiempo", fmt(sum(wk, x => x.sec))) +
+    cell("Distancia", fmtDist(sum(wk, x => x.meters)), withWatch.length ? "Reloj: " + fmtDist(sum(withWatch, x => x.realM)) : "") +
+    cell("Paladas", nf(sum(wk, x => x.strokes))) + cell("Ritmo medio", avgSpm ? nf(Math.round(avgSpm)) : "–") +
+    cell("Calorías", kcal ? nf(kcal) : "–");
+  const partial = withWatch.length && withWatch.length < wk.length ?
+    '<p class="note">La distancia del reloj es de ' + withWatch.length + " de las " + wk.length + " sesiones: las que tienen el dato anotado.</p>" : "";
+  const ranges = [[7, "7 días"], [30, "30 días"], [90, "90 días"], [0, "Todo"]];
+  let lastMonth = "";
   const list = h.length ? h.map(x => {
-    const dt = new Date(x.date);
-    // older entries only kept the end time: estimate the start from the rowed time
-    const st = x.start ? new Date(x.start) : new Date(dt.getTime() - (x.sec || 0) * 1000);
-    return '<li><div class="t"><b>' + esc(x.name) + "</b><span>" + st.toLocaleDateString("es-AR", {weekday:"short", day:"numeric", month:"short"}) + ", " +
-      hhmm(st) + " – " + hhmm(dt) + (x.seed ? '</span><span class="hmap">Mapa ' + nf(x.seed) + (x.rid && !S.routines.some(r => r.id === x.rid) ? "" : ' <button class="btn small" data-act="rep" data-id="' + x.id + '">Remarlo de nuevo</button>') + "</span>" : "</span>") +
-      "</div><div class=\"t\" style=\"text-align:right\"><b>" + fmt(x.sec) + "</b><span>" + fmtDist(x.meters) + ", " + nf(x.strokes) + " paladas</span>" +
-      '<button class="btn small danger hdel" data-act="del-hist" data-id="' + x.id + '">' + (confirmKey === "del-hist-" + x.id ? "¿Seguro?" : "Borrar") + "</button></div></li>";
+    const dt = new Date(x.date), st = startOf(x), open = histEdit === x.id;
+    // a month label each time the month changes, so the list is easy to scan
+    const mo = st.toLocaleDateString("es-AR", {month:"long", year:"numeric"}), moHead = mo !== lastMonth ? '<li class="h-month">' + mo.charAt(0).toUpperCase() + mo.slice(1) + "</li>" : "";
+    lastMonth = mo;
+    const canRep = x.seed && !(x.rid && !S.routines.some(r => r.id === x.rid));
+    const hasLog = x.rpe || x.note || x.kcal || x.realM || x.hr;
+    return moHead + '<li class="h' + (open ? " open" : "") + '" data-day="' + dayKey(st) + '">' +
+      '<div class="h-top"><b class="h-name">' + esc(x.name) + '</b><b class="h-dur">' + fmt(x.sec) + "</b></div>" +
+      '<div class="h-when">' + st.toLocaleDateString("es-AR", {weekday:"short", day:"numeric", month:"short"}) + ", " + hhmm(st) + " – " + hhmm(dt) +
+      (x.seed ? " · Mapa " + nf(x.seed) : "") + "</div>" + histStats(x) +
+      '<div class="h-acts"><button class="btn small" data-act="hist-log" data-id="' + x.id + '">' + (open ? "Listo" : hasLog ? "Editar notas" : "Anotar") + "</button>" +
+      (canRep ? '<button class="btn small" data-act="rep" data-id="' + x.id + '">Remarlo de nuevo</button>' : "") +
+      '<button class="btn small danger" data-act="del-hist" data-id="' + x.id + '">' + (confirmKey === "del-hist-" + x.id ? "¿Seguro?" : "Borrar") + "</button></div>" +
+      (open ? logHTML(x) : "") + "</li>";
   }).join("") : '<li class="empty">Cuando termines una sesión, queda anotada acá.</li>';
-  return '<h1>Historial</h1><p class="lede">Lo que remaste, sesión por sesión.</p>' +
-    '<section class="panel"><h2>Últimos 7 días</h2><div class="grid-out"><div><span>Sesiones</span><b>' + wk.length + "</b></div><div><span>Tiempo</span><b>" + fmt(sum(wk, "sec")) +
-    "</b></div><div><span>Distancia est.</span><b>" + fmtDist(sum(wk, "meters")) + "</b></div><div><span>Paladas</span><b>" + nf(sum(wk, "strokes")) + "</b></div></div></section>" +
-    '<section class="panel"><ul class="list">' + list + "</ul></section>" +
+  return '<h1>Historial</h1><p class="lede">Lo que remaste, sesión por sesión.</p>' + streakHTML() +
+    '<section class="panel"><h2>' + (days ? "Últimos " + days + " días" : "Desde el principio") + '</h2><div class="segctl">' +
+    ranges.map(r => '<button data-act="range" data-v="' + r[0] + '" aria-pressed="' + (days === r[0]) + '">' + r[1] + "</button>").join("") +
+    '</div><div class="grid-out">' + stats + "</div>" + partial + "</section>" +
+    '<section class="panel" id="hist-list"><div class="row-head"><h2>Sesiones</h2>' + (h.length ? '<span class="count">' + h.length + " en total</span>" : "") + "</div>" +
+    '<ul class="list">' + list + "</ul></section>" +
     (h.length ? '<button class="btn danger" data-act="clear-hist">' + (confirmKey === "clear-hist" ? "¿Seguro? Tocá de nuevo" : "Borrar historial") + "</button>" : "");
 }
 
@@ -374,6 +493,9 @@ function setHTML(){
       '<button class="btn small" style="margin-top:8px" data-act="test-sound">Probar sonidos</button></section>' +
     '<section class="panel"><h2>Pantalla al remar</h2><p class="note" style="margin:0 0 10px">En el río tu bote avanza al ritmo de la rutina y van pasando paisajes. También lo cambiás mientras remás con el botón de arriba.</p>' +
       '<select data-s="view"><option value="river"' + (s.view === "river" ? " selected" : "") + '>Navegar por el río</option><option value="figure"' + (s.view === "figure" ? " selected" : "") + '>Remero de costado</option></select></section>' +
+    '<section class="panel"><h2>La semana empieza el</h2><select data-s="weekStart">' +
+      [[0, "Domingo"], [1, "Lunes"], [6, "Sábado"]].map(o => '<option value="' + o[0] + '"' + (wsDay() === o[0] ? " selected" : "") + ">" + o[1] + "</option>").join("") +
+      '</select><p class="note">Se usa en el calendario y para contar la racha del historial.</p></section>' +
     '<section class="panel"><h2>Tema</h2><select data-s="theme"><option value="auto"' + (s.theme === "auto" ? " selected" : "") + '>Como el celular</option><option value="light"' + (s.theme === "light" ? " selected" : "") + '>Claro</option><option value="dark"' + (s.theme === "dark" ? " selected" : "") + ">Oscuro</option></select></section>" +
     '<p class="note">' + (storeMode === "cloud" ? "Tus rutinas e historial se guardan en tu cuenta, así los ves desde cualquier dispositivo." : "Tus rutinas e historial se guardan en este navegador.") + "</p>";
 }
@@ -408,6 +530,7 @@ function arm(key){
   render(); return false;
 }
 view.addEventListener("click", e => {
+  if (onLog(e)) return;
   const qm = e.target.closest("[data-qmode]");
   if (qm){ S.quick.mode = qm.dataset.qmode; save(); render(); return; }
   const sa = e.target.closest("[data-sa]");
@@ -461,10 +584,23 @@ view.addEventListener("click", e => {
   }
   else if (act === "del-routine"){ if (arm("del-routine")){ S.routines = S.routines.filter(r => r.id !== draft.id); save(); draft = null; go("home"); } }
   else if (act === "del-hist"){ const id = b.dataset.id; if (arm("del-hist-" + id)){ S.history = S.history.filter(x => x.id !== id); save(); render(); } }
+  else if (act === "hist-log"){ histEdit = histEdit === b.dataset.id ? null : b.dataset.id; render(); }
+  else if (act === "range"){ S.settings.histRange = +b.dataset.v; save(); render(); }
+  else if (act === "cal-day"){
+    const items = view.querySelectorAll('li.h[data-day="' + b.dataset.k + '"]');
+    if (items.length){
+      items[0].scrollIntoView({behavior:"smooth", block:"center"});
+      items.forEach(li => { li.classList.remove("hit"); void li.offsetWidth; li.classList.add("hit"); });
+    }
+  }
+  else if (act === "cal-prev"){ calOff--; render(); }
+  else if (act === "cal-toggle"){ calOpen = !calOpen; calOff = 0; render(); }
+  else if (act === "cal-next"){ if (calOff < 0) calOff++; render(); }
   else if (act === "clear-hist"){ if (arm("clear-hist")){ S.history = []; save(); render(); } }
   else if (act === "use-cal"){ S.settings.mps = Math.round(num(b.dataset.v) * 10) / 10; save(); render(); }
 });
 view.addEventListener("input", e => {
+  if (onLog(e)) return;
   const t = e.target;
   if (t.dataset.q){ S.quick[t.dataset.q] = t.value; save(); refreshOutputs(); }
   else if (t.dataset.c){ calc[t.dataset.c] = t.value; refreshOutputs(); }
@@ -497,6 +633,7 @@ view.addEventListener("change", e => {
     else if (k === "sound") S.settings.sound = t.value;
     else if (k === "view") S.settings.view = t.value;
     else if (k === "theme"){ S.settings.theme = t.value; applyTheme(); }
+    else if (k === "weekStart") S.settings.weekStart = num(t.value);
     save();
   }
 });
@@ -937,8 +1074,9 @@ function finish(){
   if (S.settings.alerts){ chime(1047, .4, .6); chime(1319, .4, .6, .15); chime(1568, .45, 1.1, .3); }
   vib(400);
   const avg = P.totalT > 0 ? P.strokes / (rowTime() / 60 || 1) : 0;
+  let hEntry = null;
   if (P.totalT >= 20){
-    const hEntry = {id:uid(), date:new Date().toISOString(), start:new Date(P.startedAt || Date.now() - P.totalT * 1000).toISOString(), name:P.name, sec:Math.round(P.totalT), strokes:P.strokes, meters:Math.round(P.meters), avgSpm:Math.round(avg)};
+    hEntry = {id:uid(), date:new Date().toISOString(), start:new Date(P.startedAt || Date.now() - P.totalT * 1000).toISOString(), name:P.name, sec:Math.round(P.totalT), strokes:P.strokes, meters:Math.round(P.meters), avgSpm:Math.round(avg)};
     if (P.usedRiver) hEntry.seed = P.seed;
     if (P.rid) hEntry.rid = P.rid; else if (P.src){ hEntry.src = P.src; hEntry.free = !!P.free; }
     S.history.push(hEntry);
@@ -947,7 +1085,8 @@ function finish(){
   }
   $("#p-sumgrid").innerHTML = '<div><span>Tiempo</span><b>' + fmt(P.totalT) + '</b></div><div><span>Paladas</span><b>' + nf(P.strokes) +
     '</b></div><div><span>Distancia est.</span><b>' + fmtDist(P.meters) + '</b></div><div><span>Ritmo medio</span><b>' + nf(avg) + '</b></div>';
-  $("#p-sumnote").textContent = P.totalT >= 20 ? "Quedó guardado en el historial." : "Fue muy corta para guardarla en el historial.";
+  $("#p-sumnote").textContent = P.totalT >= 20 ? "Quedó guardado en el historial. Si querés, anotá cómo te fue:" : "Fue muy corta para guardarla en el historial.";
+  $("#p-log").innerHTML = hEntry ? logHTML(hEntry) : "";
   $("#p-summary").hidden = false;
   unwake();
 }
@@ -1005,6 +1144,8 @@ E.stop.addEventListener("click", () => {
 el("p-minus").addEventListener("click", () => { if (curSeg() && curSeg().kind === "row" && curSpm() > 8) P.adj--; });
 el("p-plus").addEventListener("click", () => { if (curSeg() && curSeg().kind === "row" && curSpm() < 60) P.adj++; });
 el("p-done").addEventListener("click", closePlayer);
+pl.addEventListener("click", onLog);
+pl.addEventListener("input", onLog);
 el("p-view").addEventListener("click", () => {
   if (S.settings.view === "river"){ S.settings.view = "figure"; disableRiver(); } else { S.settings.view = "river"; enableRiver(); }
   save();
