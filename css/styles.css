@@ -26,14 +26,36 @@ button{cursor:pointer}
 :focus-visible{outline:3px solid var(--blade);outline-offset:2px}
 
 #app{position:fixed;top:0;right:0;bottom:0;left:0;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
+/* content scrolls under the floating tab bar, so it gets room at the bottom */
 main{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
-  padding:16px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}
+  padding:16px max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 96px) max(16px,env(safe-area-inset-left,0px))}
 .wrap{max-width:760px;margin:0 auto}
-nav.tabs{display:flex;border-top:1px solid var(--line);background:var(--card);
-  padding:0 env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
-nav.tabs button{flex:1;border:0;background:none;padding:12px 4px 13px;font-weight:600;font-size:15px;color:var(--muted);border-top:3px solid transparent;margin-top:-1px}
-nav.tabs button[aria-current="page"]{color:var(--ink);border-top-color:var(--blade)}
-@media (orientation:landscape) and (max-height:500px){nav.tabs button{padding:8px 4px 9px}}
+/* floating glass tab bar */
+nav.tabs{position:absolute;z-index:10;left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));
+  bottom:calc(env(safe-area-inset-bottom,0px) + 10px);max-width:520px;margin:0 auto;display:flex;padding:5px;border-radius:999px;
+  background:color-mix(in srgb,var(--card) 62%,transparent);border:1px solid color-mix(in srgb,var(--ink) 12%,transparent);
+  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
+  box-shadow:0 10px 30px rgba(0,0,0,.22),inset 0 1px 0 color-mix(in srgb,#fff 18%,transparent)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){nav.tabs{background:var(--card)}}
+nav.tabs button{position:relative;z-index:1;flex:1;border:0;background:none;border-radius:999px;padding:11px 4px;font-weight:600;font-size:15px;color:var(--muted);transition:color .25s,transform .15s}
+nav.tabs button[aria-current="page"]{color:var(--ink)}
+@media (orientation:landscape) and (max-height:500px){nav.tabs button{padding:7px 4px}main{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 72px)}}
+/* sliding pill behind the active tab / segment (placed by app.js) */
+.seg-ind{position:absolute;z-index:0;top:4px;bottom:4px;left:0;width:0;border-radius:999px;pointer-events:none;
+  transition:transform .38s cubic-bezier(.3,1.25,.4,1),width .38s cubic-bezier(.3,1.25,.4,1)}
+nav.tabs .seg-ind{top:5px;bottom:5px;background:color-mix(in srgb,var(--blade) 22%,transparent);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 22%,transparent),0 1px 6px rgba(0,0,0,.12)}
+/* page change: the new tab slides in from the side you're heading to */
+#view.from-r{animation:view-in-r .32s cubic-bezier(.2,.8,.2,1)}
+#view.from-l{animation:view-in-l .32s cubic-bezier(.2,.8,.2,1)}
+@keyframes view-in-r{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:none}}
+@keyframes view-in-l{from{opacity:0;transform:translateX(-28px)}to{opacity:1;transform:none}}
+/* press feedback */
+.btn,.segctl button,.rpe button,button.cal-d{transition:transform .15s,background-color .2s,color .2s}
+.btn:active,.rpe button:active,button.cal-d:active,nav.tabs button:active{transform:scale(.96)}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important}
+}
 
 h1{font-family:var(--display);font-weight:900;font-size:clamp(44px,11vw,72px);line-height:.9;margin:4px 0 6px;letter-spacing:.01em}
 h2{font-family:var(--display);font-weight:800;font-size:28px;line-height:1;margin:0 0 12px;letter-spacing:.01em}
@@ -56,8 +78,10 @@ input:focus,select:focus{border-color:var(--blade);outline:none}
 .btn.danger{color:var(--danger);border-color:transparent;background:none}
 .btn.small{padding:6px 12px;font-size:14px}
 
-.segctl{display:flex;background:var(--bg);border-radius:999px;padding:4px;margin:0 0 14px;gap:2px}
-.segctl button{flex:1;border:0;background:none;border-radius:999px;padding:9px 6px;font-weight:600;font-size:15px;color:var(--muted)}
+.segctl{position:relative;display:flex;background:var(--bg);border-radius:999px;padding:4px;margin:0 0 14px;gap:2px}
+.segctl button{position:relative;z-index:1;flex:1;border:0;background:none;border-radius:999px;padding:9px 6px;font-weight:600;font-size:15px;color:var(--muted)}
+.segctl .seg-ind{background:var(--card);box-shadow:0 1px 0 var(--line)}
+.segctl.has-ind button[aria-pressed="true"]{background:none;box-shadow:none}
 .segctl button[aria-pressed="true"]{background:var(--card);color:var(--ink);box-shadow:0 1px 0 var(--line)}
 
 .out{background:var(--bg);border-radius:12px;padding:12px 14px;margin:0 0 14px;font-size:16px}

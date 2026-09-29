@@ -185,16 +185,45 @@ function applyTheme(){
 let tab = "home", draft = null, confirmKey = null, confirmTimer = 0;
 const view = $("#view");
 
+/* sliding pill under the active tab or segment. `from` is where it was before a re-render,
+   so it glides from there instead of jumping. */
+const indRect = (c, sel) => { const p = c.querySelector(sel); return p && p.offsetWidth ? {l:p.offsetLeft, w:p.offsetWidth} : null; };
+function syncInd(c, sel, from){
+  const to = indRect(c, sel); let ind = c.querySelector(":scope > .seg-ind");
+  // hidden (0 wide) or nothing selected: fall back to the plain pressed style
+  if (!to){ if (ind) ind.remove(); c.classList.remove("has-ind"); return; }
+  if (!ind){ ind = document.createElement("span"); ind.className = "seg-ind"; c.prepend(ind); c.classList.add("has-ind"); }
+  const put = r => { ind.style.transform = "translateX(" + r.l + "px)"; ind.style.width = r.w + "px"; };
+  if (from && (from.l !== to.l || from.w !== to.w)){ ind.style.transition = "none"; put(from); void ind.offsetWidth; ind.style.transition = ""; }
+  put(to);
+}
+const NAV = document.querySelector("nav.tabs"), SEG_SEL = '[aria-pressed="true"]', TAB_SEL = '[aria-current="page"]';
+function syncAllInd(){ syncInd(NAV, TAB_SEL); view.querySelectorAll(".segctl").forEach(c => syncInd(c, SEG_SEL)); }
+window.addEventListener("resize", syncAllInd);
+// web fonts change button widths after the first paint
+try { document.fonts.ready.then(syncAllInd); } catch(e){}
+let renderedTab = null;
 function render(){
+  const same = renderedTab === tab, navFrom = indRect(NAV, TAB_SEL);
+  const segFrom = same ? [...view.querySelectorAll(".segctl")].map(c => indRect(c, SEG_SEL)) : [];
   document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === tab || (tab === "edit" && b.dataset.tab === "home") ? "page" : "false"));
   if (tab === "home") view.innerHTML = homeHTML();
   else if (tab === "edit") view.innerHTML = editHTML();
   else if (tab === "calc") view.innerHTML = calcHTML();
   else if (tab === "hist") view.innerHTML = histHTML();
   else if (tab === "set") view.innerHTML = setHTML();
+  renderedTab = tab;
+  syncInd(NAV, TAB_SEL, navFrom);
+  view.querySelectorAll(".segctl").forEach((c, i) => syncInd(c, SEG_SEL, segFrom[i]));
   refreshOutputs();
 }
-function go(t){ tab = t; render(); $("#main").scrollTop = 0; }
+const TAB_POS = {home:0, edit:0.5, calc:1, hist:2, set:3};
+function go(t){
+  const d = TAB_POS[t] - TAB_POS[tab];
+  tab = t; render(); $("#main").scrollTop = 0;
+  if (d){ view.classList.remove("from-r", "from-l"); void view.offsetWidth; view.classList.add(d > 0 ? "from-r" : "from-l"); }
+}
+view.addEventListener("animationend", () => view.classList.remove("from-r", "from-l"));
 
 function homeHTML(){
   const q = S.quick;
@@ -862,7 +891,9 @@ function startWorkout(name, segs, free, opts){
 const newSeed = () => 1 + Math.floor(Math.random() * 999999);
 function setupView(v){
   S.settings.view = v; save();
+  const from = indRect(el("su-view"), SEG_SEL);
   el("su-view").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v));
+  syncInd(el("su-view"), SEG_SEL, from);
   el("su-map").hidden = v !== "river";
   if (v === "river") enableRiver(); else disableRiver();
   describeMap();
