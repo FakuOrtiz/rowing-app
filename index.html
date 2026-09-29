@@ -38,7 +38,8 @@
   <div class="p-timer"><div class="tcell"><div id="p-time">0:00</div><div id="p-timelbl">restante del tramo</div></div><div class="tcell dcell"><div id="p-dist2">0 m</div><div class="dlbl">distancia est.</div></div></div>
   <div class="p-fig">
     <div id="p-toast" role="status" aria-live="polite"></div>
-    <div class="hint" id="p-hint"></div>
+    <div class="p-next" id="p-next"></div>
+    <div id="p-count" aria-live="assertive"></div>
     <svg id="rower" viewBox="55 48 325 115" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
       <line x1="70" y1="147" x2="322" y2="147" stroke="var(--line)" stroke-width="5" stroke-linecap="round"/>
       <line x1="80" y1="147" x2="80" y2="160" stroke="var(--line)" stroke-width="5" stroke-linecap="round"/>
@@ -73,7 +74,6 @@
     <div class="stat dstat"><b id="p-dist">0 m</b><span class="lg">distancia est.</span><span class="sh">distancia</span></div>
     <div class="stat"><b id="p-total">0:00</b><span class="lg">tiempo total</span><span class="sh">total</span></div>
   </div>
-  <div class="p-next" id="p-next"></div>
   <div class="p-ctrl">
     <button class="btn primary" id="p-pause">Pausa</button>
     <button class="btn" id="p-skip">Saltar</button>

@@ -336,7 +336,8 @@ function histHTML(){
     const dt = new Date(x.date);
     return '<li><div class="t"><b>' + esc(x.name) + "</b><span>" + dt.toLocaleDateString("es-AR", {weekday:"short", day:"numeric", month:"short"}) + ", " +
       dt.toLocaleTimeString("es-AR", {hour:"2-digit", minute:"2-digit"}) + (x.seed ? '</span><span class="hmap">Mapa ' + nf(x.seed) + (x.rid && !S.routines.some(r => r.id === x.rid) ? "" : ' <button class="btn small" data-act="rep" data-id="' + x.id + '">Remarlo de nuevo</button>') + "</span>" : "</span>") +
-      "</div><div class=\"t\" style=\"text-align:right\"><b>" + fmt(x.sec) + "</b><span>" + fmtDist(x.meters) + ", " + nf(x.strokes) + " paladas</span></div></li>";
+      "</div><div class=\"t\" style=\"text-align:right\"><b>" + fmt(x.sec) + "</b><span>" + fmtDist(x.meters) + ", " + nf(x.strokes) + " paladas</span>" +
+      '<button class="btn small danger hdel" data-act="del-hist" data-id="' + x.id + '">' + (confirmKey === "del-hist-" + x.id ? "¿Seguro?" : "Borrar") + "</button></div></li>";
   }).join("") : '<li class="empty">Cuando termines una sesión, queda anotada acá.</li>';
   return '<h1>Historial</h1><p class="lede">Lo que remaste, sesión por sesión.</p>' +
     '<section class="panel"><h2>Últimos 7 días</h2><div class="grid-out"><div><span>Sesiones</span><b>' + wk.length + "</b></div><div><span>Tiempo</span><b>" + fmt(sum(wk, "sec")) +
@@ -456,6 +457,7 @@ view.addEventListener("click", e => {
     save(); draft = null; go("home");
   }
   else if (act === "del-routine"){ if (arm("del-routine")){ S.routines = S.routines.filter(r => r.id !== draft.id); save(); draft = null; go("home"); } }
+  else if (act === "del-hist"){ const id = b.dataset.id; if (arm("del-hist-" + id)){ S.history = S.history.filter(x => x.id !== id); save(); render(); } }
   else if (act === "clear-hist"){ if (arm("clear-hist")){ S.history = []; save(); render(); } }
   else if (act === "use-cal"){ S.settings.mps = Math.round(num(b.dataset.v) * 10) / 10; save(); render(); }
 });
@@ -870,9 +872,9 @@ function draw(){
   let key, cue, L, B, A;
   const r = 1 / (1 + S.settings.ratio);
   if (P.done){ key = "rest"; cue = "Listo"; L = .8; B = .5; A = 0; }
-  else if (P.preroll > 0 && !P.setup){ key = "pre"; cue = P.preroll > 3 ? "Listo" : String(Math.ceil(P.preroll)); L = 0; B = 0; A = 0; }
   else if (P.setup){ key = "pre"; cue = "Listo"; L = 0; B = 0; A = 0; }
   else if (!P.running){ key = "pre"; cue = "Pausa"; }
+  else if (P.preroll > 0){ key = "pre"; cue = P.preroll > 3 ? "Listo" : String(Math.ceil(P.preroll)); L = 0; B = 0; A = 0; }
   else if (rest){ key = "rest"; cue = "Descansá"; L = .75; B = .55; A = .05; }
   else if (P.phase < r){ key = "drive"; cue = "Tirá"; const d = P.phase / r; L = smooth(d / .55); B = smooth((d - .35) / .4); A = smooth((d - .6) / .4); }
   else { key = "recover"; cue = "Volvé"; const q = (P.phase - r) / (1 - r); A = 1 - smooth(q / .3); B = 1 - smooth((q - .2) / .3); L = 1 - smooth((q - .4) / .6); }
@@ -898,6 +900,12 @@ function draw(){
   E.total.textContent = fmt(P.totalT);
   E.seg.textContent = P.free ? "Remo libre" : "Tramo " + Math.min(P.idx + 1, P.segs.length) + " de " + P.segs.length + (seg.mode === "dist" && !rest ? ", objetivo " + fmtDist(seg.dist) : "") + (P.maxRound > 1 && seg.round ? ", vuelta " + seg.round + " de " + P.maxRound : "") + (seg.between ? ", descanso entre vueltas" : "");
   E.bar.style.width = (P.free || !P.planned ? 0 : clamp(P.totalT / P.planned, 0, 1) * 100) + "%";
+  const cnt = P.running && !P.setup && !P.done && P.preroll > 0 && P.preroll <= 3 ? Math.ceil(P.preroll) : 0;
+  if (cnt !== P.cnt){
+    P.cnt = cnt; const c = el("p-count");
+    c.classList.toggle("on", cnt > 0);
+    c.innerHTML = cnt > 0 ? "<span>" + cnt + "</span>" : "";
+  }
   const nx = P.segs[P.idx + 1];
   E.next.textContent = P.free ? "" : nx ? "Sigue: " + (nx.kind === "rest" ? "descanso de " + fmt(nx.sec) : fmt(nx.sec) + " a " + nf(segSpm(nx)) + " paladas") : "Último tramo";
   if (riverOn && !P.setup) P.usedRiver = true;
@@ -944,11 +952,31 @@ function closePlayer(){
   pl.hidden = true;
   if (tab === "hist") render();
 }
-E.pause.addEventListener("click", () => {
-  if (P.done) return;
+function togglePause(){
+  if (P.done || P.setup) return;
   ensureAudio();
   P.running = !P.running; P.last = performance.now();
+  // coming back from a pause: count 3-2-1 before rowing again
+  if (P.running){
+    P.preroll = 3.001;
+    // a stroke cut by the pause is rowed again from the catch
+    const seg = curSeg();
+    if (seg && seg.kind === "row" && P.phase > 0){
+      P.meters = Math.max(0, P.meters - P.phase * S.settings.mps);
+      P.cyc = Math.max(0, P.cyc - P.phase); P.phase = 0;
+      const r = 1 / (1 + S.settings.ratio);
+      P.strokes = P.cyc >= r ? Math.floor(P.cyc - r) + 1 : 0;
+    }
+  }
   E.pause.textContent = P.running ? "Pausa" : "Seguir";
+}
+E.pause.addEventListener("click", togglePause);
+// tapping the rower or the river also pauses / resumes
+pl.addEventListener("click", e => {
+  if (!P.active || e.target.closest("button, input, select, a, #p-setup")) return;
+  if (!e.target.closest(".p-fig, #river-canvas")) return;
+  togglePause();
+  if (!P.running) showToast("En pausa: tocá para seguir");
 });
 el("p-skip").addEventListener("click", () => { if (!P.done){ if (P.preroll > 0) P.preroll = 0; nextSeg(false); } });
 E.stop.addEventListener("click", () => {
