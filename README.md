@@ -56,7 +56,8 @@ python3 -m http.server 8000
 
 ## Notas
 
-- **Metros por palada**: la distancia es una estimación. En *Ajustes → Medirlo con tu máquina* podés calibrarla con lo que marca tu monitor.
+- **Metros por palada**: la distancia es una estimación. En *Ajustes → Medirlo con tu máquina* podés calibrarla con lo que marca tu monitor. Si cargás tu altura en *Ajustes → Tu cuerpo*, sugiere un valor inicial; y si al anotar una sesión cargás la distancia del reloj, sugiere el valor real promediando tus últimas 5 sesiones.
+- **Calorías**: con el peso cargado, las sesiones sin calorías del reloj muestran una estimación (MET de remo según la potencia, por el peso y los minutos remando).
 - **Datos**: rutinas, historial y ajustes se guardan en el `localStorage` del navegador. Si borrás los datos del sitio, se pierden.
 - **Actualizaciones**: si cambiás archivos, subí el número en `CACHE` dentro de `sw.js` (por ejemplo `rowing-v6`) para que los celulares tomen la versión nueva.
 - **Mapas**: si agregás paisajes o elementos nuevos al generador, los números de mapa viejos pueden armar mundos algo distintos.

@@ -66,7 +66,7 @@ function HORA_SEGS(){
 }
 const DEFAULT = () => ({
   v:1, updatedAt:0,
-  settings:{mps:9, ratio:2, tick:true, tickBack:true, alerts:true, vol:2, sound:"bell", flash:false, view:"river", vibe:false, theme:"auto", histRange:7, weekStart:0},
+  settings:{mps:9, height:0, weight:0, ratio:2, tick:true, tickBack:true, alerts:true, vol:2, sound:"bell", flash:false, view:"river", vibe:false, theme:"auto", histRange:7, weekStart:0},
   quick:{mode:"time", min:"5", spm:28, dist:2000, tgt:"10:00", freeSpm:22},
   routines:PRESETS().concat(EXTRA_PRESETS()), presetsV:3, history:[]
 });
@@ -126,6 +126,23 @@ const spmFor = (dist, sec) => (dist / sec * 60) / S.settings.mps;
 const segSpm = seg => seg.kind === "rest" ? 0 : (seg.mode === "dist" ? spmFor(seg.dist, seg.sec) : seg.spm);
 const segDist = seg => seg.kind === "rest" ? 0 : (seg.mode === "dist" ? seg.dist : seg.sec / 60 * seg.spm * S.settings.mps);
 const watts = (dist, sec) => 2.8 / Math.pow(sec / dist, 3);
+// a starting point for anyone who hasn't measured: longer levers, longer stroke (about 9 m at 1,75 m tall)
+const mpsForHeight = cm => Math.round(clamp(9 * cm / 175, 5, 14) * 10) / 10;
+// meters per stroke from the watch distance of the last sessions that have it
+function watchMps(){
+  const xs = S.history.filter(x => x.realM > 0 && sStrokes(x) > 0).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  if (!xs.length) return null;
+  return {mps:xs.reduce((a, x) => a + x.realM, 0) / xs.reduce((a, x) => a + sStrokes(x), 0), n:xs.length};
+}
+// MET of stationary rowing by power (Compendium of Physical Activities) × weight × minutes rowing
+function estKcal(x){
+  const kg = S.settings.weight, min = rowMin(x), m = sMeters(x);
+  if (!(kg > 0) || !(min > 0) || !(m > 0)) return 0;
+  const w = watts(m, min * 60);
+  const met = w <= 50 ? 4.8 : w <= 100 ? lerp(4.8, 7, (w - 50) / 50) : w <= 150 ? lerp(7, 8.5, (w - 100) / 50) : lerp(8.5, 12, clamp((w - 150) / 50, 0, 1));
+  return met * kg * min / 60;
+}
+const sKcal = x => x.kcal || estKcal(x);
 function warnings(spm, pace){
   const w = [];
   if (isFinite(pace) && pace < 80) w.push("Ese ritmo es más rápido que los récords mundiales de remo.");
@@ -428,11 +445,20 @@ function logHTML(x){
   return '<div class="log" data-hid="' + x.id + '"><span class="log-q">¿Qué tan duro fue?</span><div class="rpe">' +
     [1,2,3,4,5,6,7,8,9,10].map(i => '<button data-log="rpe" data-v="' + i + '" aria-pressed="' + (r === i) + '">' + i + "</button>").join("") +
     '</div><div class="rpe-lbl"><span>Suave</span><span>A fondo</span></div>' +
-    '<div class="fields"><label class="f">Paladas del reloj<input type="number" inputmode="numeric" data-log="wStrokes" value="' + (x.wStrokes || "") + '"></label>' +
+    '<div class="fields"><label class="f">Distancia del reloj (km)<input type="text" inputmode="decimal" data-log="realKm" value="' + (x.realM ? String(x.realM / 1000).replace(".", ",") : "") + '" placeholder="Ej. 2,35"></label>' +
+    '<label class="f">Paladas del reloj<input type="number" inputmode="numeric" data-log="wStrokes" value="' + (x.wStrokes || "") + '"></label>' +
     '<label class="f">Paladas por minuto<input type="number" inputmode="numeric" data-log="wSpm" value="' + (x.wSpm || "") + '"></label>' +
-    '<label class="f">Calorías<input type="number" inputmode="numeric" data-log="kcal" value="' + (x.kcal || "") + '"></label>' +
+    '<label class="f">Calorías<input type="number" inputmode="numeric" data-log="kcal" value="' + (x.kcal || "") + '"' + (estKcal(x) ? ' placeholder="≈ ' + nf(estKcal(x)) + '"' : "") + "></label>" +
     '<label class="f">Pulso medio<input type="number" inputmode="numeric" data-log="hr" value="' + (x.hr || "") + '"></label></div>' +
+    '<p class="note log-mps">' + mpsHint(x) + "</p>" +
     '<label class="f">Nota<input type="text" data-log="note" maxlength="200" value="' + esc(x.note || "") + '" placeholder="Cómo te sentiste, qué cambiarías…"></label></div>';
+}
+// what this session's watch distance says about the meters per stroke
+function mpsHint(x){
+  if (!(x.realM > 0) || !(sStrokes(x) > 0)) return "";
+  const m = x.realM / sStrokes(x), cur = S.settings.mps;
+  return Math.abs(m - cur) < 0.15 ? "Con esa distancia tu palada da " + nf(m, 1) + " m: coincide con lo que usa la app."
+    : "Con esa distancia tu palada da " + nf(m, 1) + " m y la app usa " + nf(cur, 1) + ". En Ajustes podés pasar a usar lo que marca tu reloj.";
 }
 // shared by the summary screen and the history list; true when the event was one of ours
 function onLog(e){
@@ -445,9 +471,11 @@ function onLog(e){
     box.querySelectorAll("[data-log=rpe]").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.v === x.rpe)));
   } else {
     if (e.type !== "input") return true;
-    const key = {wStrokes:"wStrokes", wSpm:"wSpm", kcal:"kcal", hr:"hr", note:"note"}[k];
-    const v = k === "note" ? t.value.trim() : Math.round(num(t.value));
+    const key = {realKm:"realM", wStrokes:"wStrokes", wSpm:"wSpm", kcal:"kcal", hr:"hr", note:"note"}[k];
+    // the field asks for km, but a number like 2350 can only be meters
+    const v = k === "note" ? t.value.trim() : k === "realKm" ? (n => Math.round(n >= 100 ? n : n * 1000))(num(t.value)) : Math.round(num(t.value));
     if (k === "note" ? v : v > 0) x[key] = v; else delete x[key];
+    const hint = box.querySelector(".log-mps"); if (hint) hint.textContent = mpsHint(x);
     // the summary screen follows the watch numbers as they are typed
     if (box.closest("#p-log")) $("#p-sumgrid").innerHTML = sumGrid(x);
   }
@@ -458,7 +486,7 @@ function histStats(x){
   const c = (k, v) => "<div><span>" + k + "</span><b>" + v + "</b></div>";
   return '<div class="h-stats">' +
     c(x.realM ? "Dist. reloj" : "Distancia", fmtDist(sMeters(x))) + c("Paladas", nf(sStrokes(x))) + c("Paladas/min", nf(sSpm(x))) +
-    (x.rpe ? c("Esfuerzo", x.rpe + "/10") : "") + (x.kcal ? c("Calorías", nf(x.kcal)) : "") + (x.hr ? c("Pulso medio", nf(x.hr)) : "") +
+    (x.rpe ? c("Esfuerzo", x.rpe + "/10") : "") + (sKcal(x) ? c(x.kcal ? "Calorías" : "Calorías aprox.", nf(sKcal(x))) : "") + (x.hr ? c("Pulso medio", nf(x.hr)) : "") +
     "</div>" + (hasWatch(x) ? '<p class="h-src">Paladas del reloj' + (x.realM ? "" : ", distancia calculada") + "</p>" : "") +
     (x.note ? '<p class="hnote">' + esc(x.note) + "</p>" : "");
 }
@@ -468,7 +496,7 @@ function histHTML(){
   const days = S.settings.histRange, t0 = new Date(), from = days ? new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() - days + 1).getTime() : 0;
   const wk = h.filter(x => startOf(x).getTime() >= from);
   const sum = (arr, f) => arr.reduce((a, x) => a + (f(x) || 0), 0);
-  const withWatch = wk.filter(hasWatch), kcal = sum(wk, x => x.kcal);
+  const withWatch = wk.filter(hasWatch), kcal = sum(wk, sKcal), kcalEst = wk.some(x => !x.kcal && estKcal(x));
   // always the same six tiles, so the grid never ends with a gap
   const cell = (k, v, sub) => "<div><span>" + k + "</span><b>" + v + "</b>" + (sub ? "<small>" + sub + "</small>" : "") + "</div>";
   // weighted by minutes actually rowing, so rests don't drag the rate down
@@ -477,7 +505,7 @@ function histHTML(){
   const stats = cell("Sesiones", wk.length) + cell("Tiempo", fmt(sum(wk, x => x.sec))) +
     cell("Distancia", fmtDist(sum(wk, sMeters))) +
     cell("Paladas", nf(sum(wk, sStrokes))) + cell("Ritmo medio", avgSpm ? nf(Math.round(avgSpm)) : "–") +
-    cell("Calorías", kcal ? nf(kcal) : "–");
+    cell("Calorías", kcal ? nf(kcal) : "–", kcalEst ? "aprox." : "");
   const partial = withWatch.length && withWatch.length < wk.length ?
     '<p class="note">' + withWatch.length + " de las " + wk.length + " sesiones usan las paladas del reloj; el resto, lo que contó la app.</p>" : "";
   const ranges = [[7, "7 días"], [30, "30 días"], [90, "90 días"], [0, "Todo"]];
@@ -488,7 +516,7 @@ function histHTML(){
     const mo = st.toLocaleDateString("es-AR", {month:"long", year:"numeric"}), moHead = mo !== lastMonth ? '<li class="h-month">' + mo.charAt(0).toUpperCase() + mo.slice(1) + "</li>" : "";
     lastMonth = mo;
     const canRep = x.seed && !(x.rid && !S.routines.some(r => r.id === x.rid));
-    const hasLog = x.rpe || x.note || x.kcal || hasWatch(x) || x.hr;
+    const hasLog = x.rpe || x.note || x.kcal || hasWatch(x) || x.hr || x.realM;
     return moHead + '<li class="h' + (open ? " open" : "") + '" data-day="' + dayKey(st) + '">' +
       '<div class="h-top"><b class="h-name">' + esc(x.name) + '</b><b class="h-dur">' + fmt(x.sec) + "</b></div>" +
       '<div class="h-when">' + st.toLocaleDateString("es-AR", {weekday:"short", day:"numeric", month:"short"}) + ", " + hhmm(st) + " – " + hhmm(dt) +
@@ -511,8 +539,12 @@ let cal = {m:"", min:"2", spm:"20"};
 function setHTML(){
   const s = S.settings;
   return '<h1>Ajustes</h1><p class="lede">Para que los números se parezcan a los de tu máquina.</p>' +
+    '<section class="panel"><h2>Tu cuerpo</h2><p class="note" style="margin:0 0 10px">Con la altura te sugiero cuántos metros hacés por palada: con piernas y brazos más largos la palada rinde más. Con el peso estimo las calorías cuando no las cargás del reloj.</p>' +
+    '<div class="fields"><label class="f">Altura (cm)<input type="number" inputmode="numeric" min="100" max="230" data-s="height" value="' + (s.height || "") + '" placeholder="Ej. 172"></label>' +
+    '<label class="f">Peso (kg)<input type="number" inputmode="decimal" min="30" max="250" data-s="weight" value="' + (s.weight || "") + '" placeholder="Ej. 70"></label></div></section>' +
     '<section class="panel"><h2>Metros por palada</h2><p class="note" style="margin:0 0 10px">Con esto la app estima la distancia y calcula qué ritmo necesitás. En una máquina de aire tipo Concept2 suele andar entre 8 y 11 m; en las de agua o magnéticas cambia bastante.</p>' +
     '<div class="fields"><label class="f">Metros por palada<input type="number" step="0.1" min="3" max="20" inputmode="decimal" data-s="mps" value="' + s.mps + '"></label></div>' +
+    '<div id="mps-sug"></div>' +
     "<details><summary>Medirlo con tu máquina</summary><p class=\"note\">Remá un par de minutos a un ritmo parejo y fijate cuántos metros marcó el monitor. Cargalo acá:</p>" +
     '<div class="fields"><label class="f">Metros que marcó<input type="number" inputmode="numeric" data-cal="m" value="' + esc(cal.m) + '"></label>' +
     '<label class="f">Minutos<input type="text" inputmode="decimal" data-cal="min" value="' + esc(cal.min) + '"></label>' +
@@ -545,7 +577,24 @@ function calOut(){
   return "Te da <b>" + nf(mps, 1) + " m por palada</b>. " + '<button class="btn small primary" data-act="use-cal" data-v="' + mps.toFixed(2) + '">Usar este valor</button>';
 }
 
+// the watch distance beats the height: it is your body on your machine
+function mpsSug(){
+  const cur = S.settings.mps, wm = watchMps(), useBtn = v => ' <button class="btn small primary" data-act="use-cal" data-v="' + v.toFixed(2) + '">Usar este valor</button>';
+  if (wm){
+    const v = Math.round(wm.mps * 10) / 10, src = wm.n === 1 ? "tu última sesión con distancia del reloj" : "tus últimas " + wm.n + " sesiones con distancia del reloj";
+    return '<div class="out">' + (Math.abs(v - cur) < 0.1 ? "Según " + src + ", vas bien: <b>" + nf(v, 1) + " m por palada</b>."
+      : "Según " + src + ", hacés <b>" + nf(v, 1) + " m por palada</b>." + useBtn(v)) + "</div>";
+  }
+  if (S.settings.height > 0){
+    const v = mpsForHeight(S.settings.height);
+    return '<div class="out">' + (Math.abs(v - cur) < 0.1 ? "Para tu altura, " + nf(v, 1) + " m por palada es un buen punto de partida, y es lo que estás usando."
+      : "Para tu altura, un buen punto de partida es <b>" + nf(v, 1) + " m por palada</b>." + useBtn(v)) +
+      '<p class="note">Es una aproximación. Si cargás la distancia del reloj al anotar una sesión, te digo lo que hacés de verdad.</p></div>';
+  }
+  return "";
+}
 function refreshOutputs(){
+  const ms = $("#mps-sug"); if (ms) ms.innerHTML = mpsSug();
   const qo = $("#quick-out"); if (qo) qo.innerHTML = quickOut();
   if (tab === "edit" && draft){
     draft.segs.forEach((s, i) => { const el = $("#si-" + i); if (el) el.innerHTML = segInfo(s); });
@@ -654,7 +703,13 @@ view.addEventListener("input", e => {
     else { const v = num(t.value); if (v > 0) s[t.dataset.f] = v; }
     refreshOutputs();
   }
-  else if (t.dataset.s === "mps"){ const v = num(t.value); if (v >= 3 && v <= 20){ S.settings.mps = v; save(); } }
+  else if (t.dataset.s === "mps"){ const v = num(t.value); if (v >= 3 && v <= 20){ S.settings.mps = v; save(); refreshOutputs(); } }
+  else if (t.dataset.s === "height"){
+    // "1,72" means meters
+    let v = num(t.value); if (v > 0 && v < 3) v *= 100;
+    S.settings.height = v >= 100 && v <= 230 ? Math.round(v) : 0; save(); refreshOutputs();
+  }
+  else if (t.dataset.s === "weight"){ const v = num(t.value); S.settings.weight = v >= 30 && v <= 250 ? v : 0; save(); }
 });
 view.addEventListener("change", e => {
   const t = e.target;
@@ -1133,7 +1188,7 @@ function finish(){
 function sumGrid(x){
   const w = hasWatch(x) ? " (reloj)" : "";
   return '<div><span>Tiempo</span><b>' + fmt(x.sec) + '</b></div><div><span>Paladas' + w + '</span><b>' + nf(sStrokes(x)) +
-    '</b></div><div><span>Distancia ' + (w ? "calc." : "est.") + '</span><b>' + fmtDist(sMeters(x)) + '</b></div><div><span>Ritmo medio' + w + '</span><b>' + nf(sSpm(x)) + '</b></div>';
+    '</b></div><div><span>Distancia ' + (x.realM ? "(reloj)" : w ? "calc." : "est.") + '</span><b>' + fmtDist(sMeters(x)) + '</b></div><div><span>Ritmo medio' + w + '</span><b>' + nf(sSpm(x)) + '</b></div>';
 }
 function rowTime(){
   // time spent on row segments (approx: total minus completed rest segments)
